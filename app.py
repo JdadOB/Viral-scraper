@@ -73,7 +73,7 @@ def _build_app_settings() -> AppSettings:
     return AppSettings(
         apify_api_token=token,
         tiktok_actor_id=_resolve_secret("TIKTOK_ACTOR_ID", "clockworks/tiktok-scraper"),
-        instagram_actor_id=_resolve_secret("INSTAGRAM_ACTOR_ID", "apify/instagram-reel-scraper"),
+        instagram_actor_id=_resolve_secret("INSTAGRAM_ACTOR_ID", "apify/instagram-hashtag-scraper"),
         max_results_per_query=int(_resolve_secret("MAX_RESULTS_PER_QUERY", "50")),
         proxy_rotation_enabled=_resolve_secret("PROXY_ROTATION_ENABLED", "true").lower() == "true",
         cache_ttl_seconds=int(_resolve_secret("CACHE_TTL_SECONDS", "300")),
@@ -129,20 +129,33 @@ async def _scrape_async(
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Merge, deduplicate by ID
+    # Merge, deduplicate by ID — collect failures for caller to surface
     seen: set[str] = set()
     items: list[VideoItem] = []
+    failures: list[str] = []
     for result in results:
         if isinstance(result, Exception):
-            logger.warning("Scraper task failed: %s", result)
+            msg = str(result)
+            logger.warning("Scraper task failed: %s", msg)
+            failures.append(msg)
             continue
         if not result.success:
-            logger.warning("Scraper failure [%s]: %s", result.platform, result.error_message)
+            msg = f"[{result.platform.value}] {result.error_message}"
+            logger.warning("Scraper failure: %s", msg)
+            failures.append(msg)
             continue
         for item in result.items:
             if item.id and item.id not in seen:
                 seen.add(item.id)
                 items.append(item)
+
+    # Surface the first unique failure per platform in the Streamlit UI
+    seen_plat_errors: set[str] = set()
+    for f in failures:
+        key = f[:60]
+        if key not in seen_plat_errors:
+            seen_plat_errors.add(key)
+            st.warning(f"⚠️ Scraper error: {f}")
 
     logger.info(
         "Total unique items after %d runs × %d platforms: %d",
