@@ -310,85 +310,110 @@ def main() -> None:
                 _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
                 return
 
-            with st.spinner(f'Scraping viral content for "{query}" across 5 runs per platform…'):
-                try:
-                    # 5 parallel runs per platform × max_results each
-                    # gives up to 5× the target as filter candidates
-                    target = settings["max_results"]
-                    raw_items = _run_scrape(
-                        settings_obj=app_settings,
-                        query=query,
-                        platforms=platforms,
-                        max_results=target,
-                    )
-                except Exception as exc:
-                    st.error(
-                        f"Scraping failed: {exc}. "
-                        "Check your APIFY_API_TOKEN and network connection."
-                    )
-                    logger.exception("Scraping error")
-                    _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
-                    return
+            from datetime import datetime, timedelta
+            target = settings["max_results"]
+            cutoff = datetime.utcnow() - timedelta(days=30)
+            MAX_ROUNDS = 5
 
-            if not raw_items:
+            seen_ids: set[str] = set()
+            all_raw: list[VideoItem] = []
+            shown: list[VideoItem] = []
+            scrape_error = False
+
+            with st.status(
+                f'🔍 Searching for {target} viral videos for "{query}"…',
+                expanded=True,
+            ) as status:
+                for round_num in range(1, MAX_ROUNDS + 1):
+                    status.write(f"Round {round_num}/{MAX_ROUNDS} — fetching candidates…")
+                    try:
+                        batch = _run_scrape(
+                            settings_obj=app_settings,
+                            query=query,
+                            platforms=platforms,
+                            max_results=target,
+                        )
+                    except Exception as exc:
+                        st.error(
+                            f"Scraping failed: {exc}. "
+                            "Check your APIFY_API_TOKEN and network connection."
+                        )
+                        logger.exception("Scraping error")
+                        scrape_error = True
+                        break
+
+                    # Accumulate unique items across rounds
+                    new_count = 0
+                    for item in batch:
+                        if item.id and item.id not in seen_ids:
+                            seen_ids.add(item.id)
+                            all_raw.append(item)
+                            new_count += 1
+
+                    # Score everything accumulated so far
+                    scorer = ViralityScorer()
+                    scored = scorer.score_batch(list(all_raw))
+
+                    # Apply filters
+                    passing: list[VideoItem] = []
+                    for item in scored:
+                        views = item.view_count or item.play_count
+                        if item.posted_at is None:
+                            continue
+                        if item.posted_at.replace(tzinfo=None) < cutoff:
+                            continue
+                        if views < 40_000:
+                            continue
+                        if item.follower_count < 10_000:
+                            continue
+                        passing.append(item)
+
+                    status.write(
+                        f"Round {round_num}: {new_count} new unique videos fetched — "
+                        f"**{len(passing)}/{target}** qualifying so far."
+                    )
+
+                    if len(passing) >= target:
+                        shown = passing[:target]
+                        status.update(
+                            label=f"✅ Found all {target} videos in {round_num} round(s)!",
+                            state="complete",
+                        )
+                        break
+
+                    if new_count == 0:
+                        status.write("No new results found — stopping early.")
+                        shown = passing[:target]
+                        status.update(
+                            label=f"⚠️ Found {len(shown)}/{target} — no more unique results available.",
+                            state="complete",
+                        )
+                        break
+                else:
+                    # Hit MAX_ROUNDS without filling quota
+                    shown = passing[:target]
+                    status.update(
+                        label=f"⚠️ Found {len(shown)}/{target} after {MAX_ROUNDS} rounds — showing best available.",
+                        state="complete",
+                    )
+
+            if scrape_error:
+                _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
+                return
+
+            if not shown:
                 st.warning(
-                    "No results returned. The query may have no content or "
-                    "the Apify actors may need more time. Try again."
+                    "No videos matched all filters. Try a broader hashtag or "
+                    "lower your Min Virality Score."
                 )
                 _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
                 return
 
-            scorer = ViralityScorer()
-            scored_items = scorer.score_batch(raw_items)
-
-            from datetime import datetime, timedelta
-            cutoff = datetime.utcnow() - timedelta(days=30)
-
-            # Apply all hard filters — no missing data allowed
-            filtered_items: list[VideoItem] = []
-            recent, low_views, small_account, no_data = [], [], [], []
-            for item in scored_items:
-                views = item.view_count or item.play_count
-                followers = item.follower_count
-
-                # Drop if date unknown or too old
-                if item.posted_at is None:
-                    no_data.append(item)
-                    continue
-                if item.posted_at.replace(tzinfo=None) < cutoff:
-                    recent.append(item)
-                    continue
-                # Drop if view count unknown or under 40k
-                if views < 40_000:
-                    low_views.append(item)
-                    continue
-                # Drop if follower count unknown or under 10k
-                if followers < 10_000:
-                    small_account.append(item)
-                    continue
-
-                filtered_items.append(item)
-
-            # Trim to the user's requested target (already sorted by virality)
-            shown = filtered_items[:target]
             st.session_state["items"] = shown
-
-            msg = f"✅ Showing {len(shown)} of {target} requested"
-            if len(shown) < target:
-                msg += f" — only {len(shown)} passed all filters"
-            msg += f" (fetched {len(raw_items)} candidates)."
-            notes = []
-            if recent:
-                notes.append(f"{len(recent)} too old")
-            if low_views:
-                notes.append(f"{len(low_views)} under 40k views")
-            if small_account:
-                notes.append(f"{len(small_account)} under 10k followers")
-            if no_data:
-                notes.append(f"{len(no_data)} missing data")
-            if notes:
-                msg += f" Filtered out: {', '.join(notes)}."
-            st.success(msg)
+            st.success(
+                f"✅ Showing {len(shown)} viral videos "
+                f"(from {len(all_raw)} unique candidates across {round_num} round(s))."
+            )
 
     _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
 
