@@ -98,42 +98,56 @@ async def _scrape_async(
     query: str,
     platforms: list[str],
     max_results: int,
+    runs_per_platform: int = 5,
 ) -> list[VideoItem]:
+    """Run `runs_per_platform` parallel calls per platform, merge and deduplicate."""
     client = _get_apify_client(settings_obj.apify_api_token, settings_obj.proxy_rotation_enabled)
-    tasks = []
 
     is_hashtag = query.startswith("#")
     clean_query = query.lstrip("#").strip()
 
-    if "tiktok" in platforms:
-        scraper = TikTokScraper(client=client, settings=settings_obj)
-        tasks.append(
-            scraper.scrape_hashtag(clean_query, max_results=max_results)
-            if is_hashtag
-            else scraper.scrape_keyword(clean_query, max_results=max_results)
-        )
+    tasks = []
 
-    if "instagram" in platforms:
-        scraper = InstagramScraper(client=client, settings=settings_obj)
-        tasks.append(
-            scraper.scrape_hashtag(clean_query, max_results=max_results)
-            if is_hashtag
-            else scraper.scrape_keyword(clean_query, max_results=max_results)
-        )
+    for _ in range(runs_per_platform):
+        if "tiktok" in platforms:
+            scraper = TikTokScraper(client=client, settings=settings_obj)
+            tasks.append(
+                scraper.scrape_hashtag(clean_query, max_results=max_results)
+                if is_hashtag
+                else scraper.scrape_keyword(clean_query, max_results=max_results)
+            )
+        if "instagram" in platforms:
+            scraper = InstagramScraper(client=client, settings=settings_obj)
+            tasks.append(
+                scraper.scrape_hashtag(clean_query, max_results=max_results)
+                if is_hashtag
+                else scraper.scrape_keyword(clean_query, max_results=max_results)
+            )
 
     if not tasks:
         return []
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Merge, deduplicate by ID
+    seen: set[str] = set()
     items: list[VideoItem] = []
     for result in results:
         if isinstance(result, Exception):
             logger.warning("Scraper task failed: %s", result)
             continue
-        if result.success:
-            items.extend(result.items)
-        else:
+        if not result.success:
             logger.warning("Scraper failure [%s]: %s", result.platform, result.error_message)
+            continue
+        for item in result.items:
+            if item.id and item.id not in seen:
+                seen.add(item.id)
+                items.append(item)
+
+    logger.info(
+        "Total unique items after %d runs × %d platforms: %d",
+        runs_per_platform, len(platforms), len(items),
+    )
     return items
 
 
@@ -296,17 +310,16 @@ def main() -> None:
                 _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
                 return
 
-            with st.spinner(f'Scraping viral content for "{query}"…'):
+            with st.spinner(f'Scraping viral content for "{query}" across 5 runs per platform…'):
                 try:
-                    # Fetch 5× the target so filters have candidates to replace
-                    # removed videos; cap at 200 to avoid excessive API usage
+                    # 5 parallel runs per platform × max_results each
+                    # gives up to 5× the target as filter candidates
                     target = settings["max_results"]
-                    fetch_count = min(target * 5, 200)
                     raw_items = _run_scrape(
                         settings_obj=app_settings,
                         query=query,
                         platforms=platforms,
-                        max_results=fetch_count,
+                        max_results=target,
                     )
                 except Exception as exc:
                     st.error(
