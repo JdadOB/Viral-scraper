@@ -97,7 +97,7 @@ def render_sidebar() -> dict:
             "Min Virality Score",
             min_value=0,
             max_value=100,
-            value=50,
+            value=0,
             step=1,
             key="slider_virality",
             help="Only show videos with a virality score at or above this threshold.",

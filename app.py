@@ -244,8 +244,15 @@ def _render_tabs(tab_discovery, tab_trends, tab_analytics, settings: dict) -> No
     analyzer = TrendAnalyzer()
 
     if items:
+        # Pre-filter once so summary metrics match what the grid shows
+        min_virality = settings.get("min_virality", 0)
+        visible = [i for i in items if i.virality_score >= min_virality]
+        if settings.get("richey_only", False):
+            min_richey = settings.get("min_richey", 0.6)
+            visible = [i for i in visible if richey_scores.get(i.id, 0.0) >= min_richey]
+
         with tab_discovery:
-            render_summary_metrics(items)
+            render_summary_metrics(visible)
             st.markdown("<br>", unsafe_allow_html=True)
             render_discovery_dashboard(items, richey_scores, settings)
         with tab_trends:
