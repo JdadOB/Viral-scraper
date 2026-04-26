@@ -298,11 +298,15 @@ def main() -> None:
 
             with st.spinner(f'Scraping viral content for "{query}"…'):
                 try:
+                    # Fetch 5× the target so filters have candidates to replace
+                    # removed videos; cap at 200 to avoid excessive API usage
+                    target = settings["max_results"]
+                    fetch_count = min(target * 5, 200)
                     raw_items = _run_scrape(
                         settings_obj=app_settings,
                         query=query,
                         platforms=platforms,
-                        max_results=settings["max_results"],
+                        max_results=fetch_count,
                     )
                 except Exception as exc:
                     st.error(
@@ -352,12 +356,17 @@ def main() -> None:
 
                 filtered_items.append(item)
 
-            st.session_state["items"] = filtered_items
+            # Trim to the user's requested target (already sorted by virality)
+            shown = filtered_items[:target]
+            st.session_state["items"] = shown
 
-            msg = f"✅ Scraped {len(raw_items)} videos → {len(filtered_items)} shown."
+            msg = f"✅ Showing {len(shown)} of {target} requested"
+            if len(shown) < target:
+                msg += f" — only {len(shown)} passed all filters"
+            msg += f" (fetched {len(raw_items)} candidates)."
             notes = []
             if recent:
-                notes.append(f"{len(recent)} older than 30 days")
+                notes.append(f"{len(recent)} too old")
             if low_views:
                 notes.append(f"{len(low_views)} under 40k views")
             if small_account:
@@ -365,7 +374,7 @@ def main() -> None:
             if no_data:
                 notes.append(f"{len(no_data)} missing data")
             if notes:
-                msg += f" (Removed: {', '.join(notes)}.)"
+                msg += f" Filtered out: {', '.join(notes)}."
             st.success(msg)
 
     _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
