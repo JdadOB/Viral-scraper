@@ -1,119 +1,97 @@
+from __future__ import annotations
+
 from datetime import datetime
-from math import log
-import numpy as np
+from math import log10
 
 from core.data_models import VideoItem
 
 
 class ViralityScorer:
-    """Scores VideoItems on a 0–100 virality scale using four weighted sub-scores."""
+    """Scores VideoItems on a 0–100 virality scale.
 
-    # Normalisation thresholds (per-hour rates that map to 100)
-    LIKES_THRESHOLD = 10_000   # likes/hr → 100
-    VIEWS_THRESHOLD = 100_000  # views/hr → 100
-    COMMENTS_THRESHOLD = 500   # comments/hr → 100
+    Primary signal: view-to-follower ratio — a video is viral when it
+    reaches far beyond the creator's existing audience.
+    Secondary signals: engagement velocity and engagement rate vs views.
+    """
 
-    # Sub-score weights (must sum to 1.0)
-    W_VELOCITY = 0.35
-    W_SAVE_VIEW = 0.25
-    W_SOUND = 0.20
-    W_DIVERSITY = 0.20
+    # Weights — must sum to 1.0
+    W_VIEW_FOLLOWER = 0.55
+    W_ENGAGEMENT_VELOCITY = 0.25
+    W_ENGAGEMENT_RATE = 0.20
 
-    # ------------------------------------------------------------------ #
-    # Public API                                                           #
-    # ------------------------------------------------------------------ #
+    # Engagement velocity thresholds (total actions per hour → score 100)
+    TOTAL_ENGAGEMENT_THRESHOLD = 2_000  # likes+comments+shares/hr
 
     def score(self, item: VideoItem) -> float:
-        """Return a virality score in [0, 100] for a single VideoItem."""
-        velocity = self._engagement_velocity_score(item)
-        save_view = self._save_view_ratio_score(item)
-        sound = self._sound_trend_score(item)
-        diversity = self._engagement_diversity_score(item)
-
-        raw = (
-            velocity * self.W_VELOCITY
-            + save_view * self.W_SAVE_VIEW
-            + sound * self.W_SOUND
-            + diversity * self.W_DIVERSITY
-        )
+        """Return a virality score in [0, 100]."""
+        vf = self._view_follower_score(item)
+        vel = self._engagement_velocity_score(item)
+        rate = self._engagement_rate_score(item)
+        raw = vf * self.W_VIEW_FOLLOWER + vel * self.W_ENGAGEMENT_VELOCITY + rate * self.W_ENGAGEMENT_RATE
         return round(min(max(raw, 0.0), 100.0), 4)
 
     def score_batch(self, items: list[VideoItem]) -> list[VideoItem]:
-        """Score every item in *items*, set virality_score, and return sorted descending."""
+        """Score every item and return sorted descending by virality_score."""
         for item in items:
             item.virality_score = self.score(item)
         return sorted(items, key=lambda x: x.virality_score, reverse=True)
 
-    # ------------------------------------------------------------------ #
-    # Sub-scores                                                           #
-    # ------------------------------------------------------------------ #
+    # ------------------------------------------------------------------
+    # Sub-scores
+    # ------------------------------------------------------------------
+
+    def _view_follower_score(self, item: VideoItem) -> float:
+        """55% weight — how far the video punched above the creator's reach.
+
+        Uses a log10 scale so that small accounts going mega-viral score
+        just as high as large accounts going relatively viral:
+          ratio  1x  →  score   0   (performed as expected)
+          ratio  5x  →  score  35
+          ratio 10x  →  score  50
+          ratio 50x  →  score  85
+          ratio 100x →  score 100
+        """
+        views = item.view_count or item.play_count
+        followers = item.follower_count
+
+        if followers <= 0:
+            # No follower data — fall back to absolute view count signal
+            # 1M views ≈ score 70, 10M views ≈ score 100
+            if views <= 0:
+                return 0.0
+            return min(log10(max(views, 1)) / 7 * 100, 100.0)
+
+        ratio = views / followers
+        if ratio <= 1.0:
+            return 0.0
+        # log10(ratio) / log10(100) * 100  →  100x = score 100
+        return min(log10(ratio) / 2.0 * 100, 100.0)
 
     def _engagement_velocity_score(self, item: VideoItem) -> float:
-        """35 % weight — rate of likes, views, and comments per hour."""
+        """25% weight — total engagement actions per hour since posting."""
         if item.posted_at is not None:
-            now = datetime.utcnow()
-            # Make both naive for subtraction if needed
             posted = item.posted_at
+            now = datetime.utcnow()
             if posted.tzinfo is not None:
                 from datetime import timezone
                 now = datetime.now(timezone.utc)
-            hours = (now - posted).total_seconds() / 3600.0
+            hours = max((now - posted).total_seconds() / 3600.0, 1.0)
         else:
             hours = 24.0
 
-        hours = max(hours, 1.0)
+        total_engagement = item.like_count + item.comment_count + item.share_count
+        per_hour = total_engagement / hours
+        return min(per_hour / self.TOTAL_ENGAGEMENT_THRESHOLD, 1.0) * 100.0
 
-        likes_per_hr = item.like_count / hours
-        views_per_hr = item.view_count / hours
-        comments_per_hr = item.comment_count / hours
+    def _engagement_rate_score(self, item: VideoItem) -> float:
+        """20% weight — (likes + comments + shares) / views.
 
-        likes_norm = min(likes_per_hr / self.LIKES_THRESHOLD, 1.0) * 100.0
-        views_norm = min(views_per_hr / self.VIEWS_THRESHOLD, 1.0) * 100.0
-        comments_norm = min(comments_per_hr / self.COMMENTS_THRESHOLD, 1.0) * 100.0
-
-        return likes_norm * 0.4 + views_norm * 0.4 + comments_norm * 0.2
-
-    def _save_view_ratio_score(self, item: VideoItem) -> float:
-        """25 % weight — save-to-view ratio (5 % = perfect score)."""
-        ratio = item.save_count / max(item.view_count, 1)
-        return min(ratio / 0.05, 1.0) * 100.0
-
-    def _sound_trend_score(self, item: VideoItem) -> float:
-        """20 % weight — how fresh the sound is."""
-        days = item.sound_duration_days
-        if days == 0:
-            return 50.0
-        if days <= 7:
-            return 100.0
-        if days <= 30:
-            return 70.0
-        if days <= 90:
-            return 30.0
-        return 10.0
-
-    def _engagement_diversity_score(self, item: VideoItem) -> float:
-        """20 % weight — Shannon entropy across likes, comments, shares, saves."""
-        counts = np.array(
-            [
-                float(item.like_count),
-                float(item.comment_count),
-                float(item.share_count),
-                float(item.save_count),
-            ],
-            dtype=np.float64,
-        )
-
-        total = counts.sum()
-        if total == 0.0:
-            return 0.0
-
-        probs = counts / total
-        # Compute entropy; suppress log(0) warnings by masking zeros
-        nonzero = probs[probs > 0.0]
-        entropy = float(-np.sum(nonzero * np.log(nonzero)))
-
-        max_entropy = log(4)  # log(number of channels)
-        if max_entropy == 0.0:
-            return 0.0
-
-        return min(entropy / max_entropy, 1.0) * 100.0
+          < 1%  →  low
+            3%  →  good  (score ~60)
+            5%  →  great (score ~100)
+           10%+ →  capped at 100
+        """
+        views = max(item.view_count or item.play_count, 1)
+        total_engagement = item.like_count + item.comment_count + item.share_count
+        rate = total_engagement / views
+        return min(rate / 0.05, 1.0) * 100.0

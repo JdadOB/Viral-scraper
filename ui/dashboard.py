@@ -12,6 +12,7 @@ from engine.trend_analyzer import TrendAnalyzer
 from ui.components import metric_card, render_cards_grid, trend_pill, empty_state
 
 
+
 # ---------------------------------------------------------------------------
 # Colour palette constants
 # ---------------------------------------------------------------------------
@@ -120,7 +121,6 @@ def render_summary_metrics(items: list[VideoItem]) -> None:
 
 def render_discovery_dashboard(
     items: list[VideoItem],
-    richey_scores: dict,
     settings: dict,
 ) -> None:
     """Sort and filter items per settings, then render the video card grid."""
@@ -131,11 +131,6 @@ def render_discovery_dashboard(
     # --- Apply virality floor -------------------------------------------
     min_virality = settings.get("min_virality", 0)
     filtered = [i for i in items if i.virality_score >= min_virality]
-
-    # --- Apply richey filter --------------------------------------------
-    if settings.get("richey_only", False):
-        min_richey = settings.get("min_richey", 0.6)
-        filtered = [i for i in filtered if richey_scores.get(i.id, 0.0) >= min_richey]
 
     # --- Sort -----------------------------------------------------------
     sort_by = settings.get("sort_by", "Virality Score")
@@ -156,10 +151,7 @@ def render_discovery_dashboard(
     filtered = filtered[:max_results]
 
     if not filtered:
-        empty_state(
-            f"No videos matched your filters "
-            f"(virality ≥ {min_virality}, richey ≥ {settings.get('min_richey', 0.6):.2f})."
-        )
+        empty_state(f"No videos matched your filters (virality ≥ {min_virality}).")
         return
 
     # --- Summary bar ---------------------------------------------------
@@ -172,7 +164,7 @@ def render_discovery_dashboard(
 
     # --- Render grid ---------------------------------------------------
     card_cols = settings.get("card_cols", 3)
-    render_cards_grid(filtered, richey_scores, cols=card_cols)
+    render_cards_grid(filtered, cols=card_cols)
 
 
 # ---------------------------------------------------------------------------

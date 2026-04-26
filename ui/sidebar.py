@@ -103,16 +103,6 @@ def render_sidebar() -> dict:
             help="Only show videos with a virality score at or above this threshold.",
         )
 
-        min_richey = st.slider(
-            "Min Richey Score",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.6,
-            step=0.05,
-            key="slider_richey",
-            help="Only show videos with a Richey premium-brand score at or above this value.",
-        )
-
         sort_by = st.selectbox(
             "Sort By",
             options=["Virality Score", "Views", "Likes", "Recent"],
@@ -141,13 +131,6 @@ def render_sidebar() -> dict:
             key="select_card_cols",
         )
 
-        richey_only = st.checkbox(
-            "Show Richey Filter Only",
-            value=True,
-            key="chk_richey_only",
-            help="Hide videos that do not meet the Richey premium-brand threshold.",
-        )
-
         # ------------------------------------------------------------------ #
         # Footer
         # ------------------------------------------------------------------ #
@@ -162,9 +145,7 @@ def render_sidebar() -> dict:
         "query": query.strip(),
         "scrape_clicked": scrape_clicked,
         "min_virality": int(min_virality),
-        "min_richey": float(min_richey),
         "sort_by": sort_by,
         "max_results": int(max_results),
         "card_cols": int(card_cols),
-        "richey_only": richey_only,
     }

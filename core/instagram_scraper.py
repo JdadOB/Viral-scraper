@@ -134,6 +134,10 @@ class InstagramScraper:
 
         play_count = int(raw.get("videoPlayCount") or raw.get("playCount") or 0)
         view_count = int(raw.get("videoViewCount") or raw.get("viewCount") or play_count)
+        follower_count = int(
+            raw.get("followersCount") or raw.get("ownerFollowersCount") or
+            raw.get("followers") or 0
+        )
 
         return VideoItem(
             id=str(raw.get("id") or raw.get("shortCode") or ""),
@@ -148,6 +152,7 @@ class InstagramScraper:
             share_count=0,
             save_count=0,
             view_count=view_count,
+            follower_count=follower_count,
             duration_seconds=float(raw.get("videoDuration") or raw.get("durationSeconds") or 0.0),
             hashtags=hashtags,
             sound_name=sound_name,

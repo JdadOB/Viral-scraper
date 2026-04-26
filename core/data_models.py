@@ -25,6 +25,7 @@ class VideoItem(BaseModel):
     share_count: int = 0
     save_count: int = 0
     view_count: int = 0
+    follower_count: int = 0
     duration_seconds: float = 0.0
     hashtags: list[str] = Field(default_factory=list)
     sound_name: str = ""

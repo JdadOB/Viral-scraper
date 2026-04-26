@@ -33,7 +33,6 @@ from core.tiktok_scraper import TikTokScraper
 from core.instagram_scraper import InstagramScraper
 from core.data_models import VideoItem
 from engine.virality_scorer import ViralityScorer
-from engine.content_filter import ContentFilter
 from engine.trend_analyzer import TrendAnalyzer
 from ui.styles import inject_css
 from ui.sidebar import render_sidebar
@@ -240,21 +239,17 @@ def _render_hero() -> None:
 
 def _render_tabs(tab_discovery, tab_trends, tab_analytics, settings: dict) -> None:
     items: list[VideoItem] = st.session_state.get("items", [])
-    richey_scores: dict = st.session_state.get("richey_scores", {})
     analyzer = TrendAnalyzer()
 
     if items:
-        # Pre-filter once so summary metrics match what the grid shows
+        # Pre-filter so summary metrics match what the grid shows
         min_virality = settings.get("min_virality", 0)
         visible = [i for i in items if i.virality_score >= min_virality]
-        if settings.get("richey_only", False):
-            min_richey = settings.get("min_richey", 0.6)
-            visible = [i for i in visible if richey_scores.get(i.id, 0.0) >= min_richey]
 
         with tab_discovery:
             render_summary_metrics(visible)
             st.markdown("<br>", unsafe_allow_html=True)
-            render_discovery_dashboard(items, richey_scores, settings)
+            render_discovery_dashboard(items, settings)
         with tab_trends:
             render_trends_map(items, analyzer)
         with tab_analytics:
@@ -329,25 +324,9 @@ def main() -> None:
             scorer = ViralityScorer()
             scored_items = scorer.score_batch(raw_items)
 
-            cf = ContentFilter()
-            richey_scores: dict[str, float] = {
-                item.id: cf.richey_score(item) for item in scored_items
-            }
+            st.session_state["items"] = scored_items
 
-            filtered_items = (
-                cf.filter(scored_items, min_richey_score=settings["min_richey"])
-                if settings["richey_only"]
-                else scored_items
-            )
-
-            st.session_state["items"] = filtered_items
-            st.session_state["richey_scores"] = richey_scores
-            st.session_state["all_items"] = scored_items
-
-            st.success(
-                f"✅ Scraped {len(raw_items)} videos → "
-                f"{len(filtered_items)} passed filters."
-            )
+            st.success(f"✅ Scraped {len(raw_items)} videos — scored and ready.")
 
     _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
 

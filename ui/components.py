@@ -38,13 +38,8 @@ def _truncate(text: str, max_len: int = 100) -> str:
 # video_card
 # ---------------------------------------------------------------------------
 
-def video_card(item: VideoItem, richey_score: float = 0.0) -> str:
-    """Return an HTML string for a glassmorphic video card.
-
-    Includes thumbnail (or gradient placeholder), score badge, platform badge,
-    author, description, metrics row, Richey score bar, hashtag pills, and
-    an "Open" link button.
-    """
+def video_card(item: VideoItem) -> str:
+    """Return an HTML string for a glassmorphic video card."""
     # --- Thumbnail -------------------------------------------------------
     if item.thumbnail_url:
         thumb_html = (
@@ -87,14 +82,15 @@ def video_card(item: VideoItem, richey_score: float = 0.0) -> str:
         '</div>'
     )
 
-    # --- Richey score bar ------------------------------------------------
-    bar_pct = int(round(richey_score * 100))
-    richey_html = (
-        f'<div class="richey-label">Richey Score: {richey_score:.2f}</div>'
-        '<div class="richey-bar-wrap">'
-        f'<div class="richey-bar-fill" style="width:{bar_pct}%;"></div>'
-        '</div>'
-    )
+    # --- View/follower ratio badge (viral signal) -------------------------
+    views = item.view_count or item.play_count
+    if item.follower_count > 0 and views > 0:
+        ratio = views / item.follower_count
+        ratio_html = (
+            f'<div class="viral-ratio">📡 {ratio:.0f}× reach</div>'
+        )
+    else:
+        ratio_html = ""
 
     # --- Hashtag pills (first 5) -----------------------------------------
     tags = item.hashtags[:5]
@@ -123,7 +119,7 @@ def video_card(item: VideoItem, richey_score: float = 0.0) -> str:
   </div>
   {desc_html}
   {metrics_html}
-  {richey_html}
+  {ratio_html}
   {tags_html}
   {open_btn}
 </div>
@@ -170,24 +166,16 @@ def trend_pill(tag: str, count: int, is_hot: bool = False) -> str:
 # render_cards_grid
 # ---------------------------------------------------------------------------
 
-def render_cards_grid(
-    items: list[VideoItem],
-    richey_scores: dict[str, float],
-    cols: int = 3,
-) -> None:
+def render_cards_grid(items: list[VideoItem], cols: int = 3) -> None:
     """Render a CSS grid of video cards using st.columns."""
     if not items:
         empty_state()
         return
 
-    # Build column groups
     columns = st.columns(cols)
     for idx, item in enumerate(items):
-        col = columns[idx % cols]
-        with col:
-            r_score = richey_scores.get(item.id, 0.0)
-            card_html = video_card(item, richey_score=r_score)
-            st.markdown(card_html, unsafe_allow_html=True)
+        with columns[idx % cols]:
+            st.markdown(video_card(item), unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------

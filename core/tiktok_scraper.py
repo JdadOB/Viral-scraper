@@ -131,6 +131,11 @@ class TikTokScraper:
         except (TypeError, ValueError):
             sound_duration_days = 0
 
+        follower_count = int(
+            author_meta.get("fans") or author_meta.get("followers") or
+            author_meta.get("followerCount") or 0
+        )
+
         return VideoItem(
             id=str(raw.get("id") or ""),
             platform=Platform.TIKTOK,
@@ -144,6 +149,7 @@ class TikTokScraper:
             share_count=int(raw.get("shareCount") or 0),
             save_count=int(raw.get("collectCount") or raw.get("saveCount") or 0),
             view_count=int(raw.get("playCount") or 0),
+            follower_count=follower_count,
             duration_seconds=float(video_meta.get("duration") or raw.get("videoMeta", {}).get("duration") or 0.0),
             hashtags=hashtags,
             sound_name=str(music_meta.get("musicName") or music_meta.get("soundName") or ""),
