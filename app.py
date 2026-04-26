@@ -324,33 +324,46 @@ def main() -> None:
             scorer = ViralityScorer()
             scored_items = scorer.score_batch(raw_items)
 
-            # Hard 30-day cutoff
             from datetime import datetime, timedelta
             cutoff = datetime.utcnow() - timedelta(days=30)
-            recent_items = [
-                item for item in scored_items
-                if item.posted_at is None
-                or item.posted_at.replace(tzinfo=None) >= cutoff
-            ]
 
-            # 10k follower minimum — skip micro accounts
-            # (keep items where follower data is absent so we don't over-filter)
-            filtered_items = [
-                item for item in recent_items
-                if item.follower_count == 0 or item.follower_count >= 10_000
-            ]
+            # Apply all hard filters — no missing data allowed
+            filtered_items: list[VideoItem] = []
+            recent, low_views, small_account, no_data = [], [], [], []
+            for item in scored_items:
+                views = item.view_count or item.play_count
+                followers = item.follower_count
 
-            dropped_old = len(scored_items) - len(recent_items)
-            dropped_small = len(recent_items) - len(filtered_items)
+                # Drop if date unknown or too old
+                if item.posted_at is None:
+                    no_data.append(item)
+                    continue
+                if item.posted_at.replace(tzinfo=None) < cutoff:
+                    recent.append(item)
+                    continue
+                # Drop if view count unknown or under 40k
+                if views < 40_000:
+                    low_views.append(item)
+                    continue
+                # Drop if follower count unknown or under 10k
+                if followers < 10_000:
+                    small_account.append(item)
+                    continue
+
+                filtered_items.append(item)
 
             st.session_state["items"] = filtered_items
 
             msg = f"✅ Scraped {len(raw_items)} videos → {len(filtered_items)} shown."
             notes = []
-            if dropped_old:
-                notes.append(f"{dropped_old} older than 30 days")
-            if dropped_small:
-                notes.append(f"{dropped_small} under 10k followers")
+            if recent:
+                notes.append(f"{len(recent)} older than 30 days")
+            if low_views:
+                notes.append(f"{len(low_views)} under 40k views")
+            if small_account:
+                notes.append(f"{len(small_account)} under 10k followers")
+            if no_data:
+                notes.append(f"{len(no_data)} missing data")
             if notes:
                 msg += f" (Removed: {', '.join(notes)}.)"
             st.success(msg)
