@@ -73,7 +73,7 @@ def _build_app_settings() -> AppSettings:
     return AppSettings(
         apify_api_token=token,
         tiktok_actor_id=_resolve_secret("TIKTOK_ACTOR_ID", "clockworks/tiktok-scraper"),
-        instagram_actor_id=_resolve_secret("INSTAGRAM_ACTOR_ID", "apify/instagram-scraper"),
+        instagram_actor_id=_resolve_secret("INSTAGRAM_ACTOR_ID", "apify/instagram-reel-scraper"),
         max_results_per_query=int(_resolve_secret("MAX_RESULTS_PER_QUERY", "50")),
         proxy_rotation_enabled=_resolve_secret("PROXY_ROTATION_ENABLED", "true").lower() == "true",
         cache_ttl_seconds=int(_resolve_secret("CACHE_TTL_SECONDS", "300")),
