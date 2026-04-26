@@ -1,0 +1,330 @@
+"""
+Viral Content Scraper — Streamlit App
+Run: streamlit run app.py
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+
+import streamlit as st
+from dotenv import load_dotenv
+
+# ---------------------------------------------------------------------------
+# Page config — must be the very first Streamlit call
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="🔮 Viral Scraper",
+    page_icon="🔮",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ---------------------------------------------------------------------------
+# Load environment variables
+# ---------------------------------------------------------------------------
+load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Internal imports (after dotenv so settings can read env vars)
+# ---------------------------------------------------------------------------
+from config.settings import AppSettings
+from core.apify_client import ApifyClientWrapper
+from core.tiktok_scraper import TikTokScraper
+from core.instagram_scraper import InstagramScraper
+from core.data_models import VideoItem, Platform
+from engine.virality_scorer import ViralityScorer
+from engine.content_filter import ContentFilter
+from engine.trend_analyzer import TrendAnalyzer
+from ui.styles import inject_css
+from ui.sidebar import render_sidebar
+from ui.dashboard import (
+    render_summary_metrics,
+    render_discovery_dashboard,
+    render_trends_map,
+    render_virality_chart,
+)
+from ui.components import empty_state
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _build_app_settings() -> AppSettings:
+    """Build AppSettings; raises if APIFY_API_TOKEN is missing."""
+    token = os.getenv("APIFY_API_TOKEN", "")
+    if not token:
+        raise EnvironmentError(
+            "APIFY_API_TOKEN is not set. "
+            "Add it to your .env file or export it as an environment variable."
+        )
+    return AppSettings(apify_api_token=token)
+
+
+async def _run_scrapers(
+    settings_obj: AppSettings,
+    query: str,
+    platforms: list[str],
+    max_results: int,
+) -> list[VideoItem]:
+    """Run selected platform scrapers concurrently and merge results."""
+    client = ApifyClientWrapper(api_token=settings_obj.apify_api_token)
+    tasks = []
+
+    is_hashtag = query.startswith("#")
+    clean_query = query.lstrip("#").strip()
+
+    if "tiktok" in platforms:
+        scraper = TikTokScraper(client=client, settings=settings_obj)
+        if is_hashtag:
+            tasks.append(scraper.scrape_hashtag(clean_query, max_results=max_results))
+        else:
+            tasks.append(scraper.scrape_keyword(clean_query, max_results=max_results))
+
+    if "instagram" in platforms:
+        scraper = InstagramScraper(client=client, settings=settings_obj)
+        if is_hashtag:
+            tasks.append(scraper.scrape_hashtag(clean_query, max_results=max_results))
+        else:
+            tasks.append(scraper.scrape_keyword(clean_query, max_results=max_results))
+
+    if not tasks:
+        return []
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    items: list[VideoItem] = []
+    for result in results:
+        if isinstance(result, Exception):
+            logger.warning("Scraper task failed: %s", result)
+            continue
+        if result.success:
+            items.extend(result.items)
+        else:
+            logger.warning(
+                "Scraper returned failure for platform %s: %s",
+                result.platform,
+                result.error_message,
+            )
+    return items
+
+
+def _render_hero() -> None:
+    """Render the welcome hero section shown when no data is loaded yet."""
+    st.markdown(
+        """
+        <div style="text-align:center;padding:3rem 1rem 2rem;">
+          <div class="hero-title">Discover What's Going Viral</div>
+          <div class="hero-subtitle">
+            Powered by real-time Apify scraping + AI virality analysis
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown(
+            """
+            <div class="glass-card" style="text-align:center;padding:2rem 1.5rem;">
+              <span class="hero-feature-icon">🎬</span>
+              <div class="hero-feature-title">Multi-Platform</div>
+              <div class="hero-feature-desc">
+                Scrape TikTok and Instagram simultaneously.
+                Enter any hashtag or keyword and get results
+                from both platforms in a single click.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+        st.markdown(
+            """
+            <div class="glass-card" style="text-align:center;padding:2rem 1.5rem;">
+              <span class="hero-feature-icon">🧬</span>
+              <div class="hero-feature-title">Virality Engine</div>
+              <div class="hero-feature-desc">
+                Four-dimensional virality scoring based on
+                engagement velocity, save-to-view ratio,
+                sound freshness, and engagement diversity.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col3:
+        st.markdown(
+            """
+            <div class="glass-card" style="text-align:center;padding:2rem 1.5rem;">
+              <span class="hero-feature-icon">💎</span>
+              <div class="hero-feature-title">Richey Filter</div>
+              <div class="hero-feature-desc">
+                Premium brand-quality filter that scores
+                production value, engagement quality, optimal
+                content length, and curated hashtag usage.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # ASCII-style info block
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="glass-card" style="max-width:640px;margin:0 auto;text-align:center;padding:1.5rem 2rem;">
+          <div style="font-family:'Courier New',monospace;font-size:0.78rem;
+                      color:#B57EDC;line-height:1.8;letter-spacing:0.04em;">
+            ╔══════════════════════════════════╗<br>
+            ║  &nbsp;1. Enter a hashtag or keyword&nbsp;&nbsp; ║<br>
+            ║  &nbsp;2. Select your platforms&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ║<br>
+            ║  &nbsp;3. Click 🚀 Scrape Now&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ║<br>
+            ║  &nbsp;4. Explore viral content&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ║<br>
+            ╚══════════════════════════════════╝
+          </div>
+          <div style="margin-top:1rem;font-size:0.82rem;color:#A0A0B0;">
+            Use the sidebar on the left to configure scraping options.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main app
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    # 1. Inject CSS design system
+    inject_css()
+
+    # 2. Render sidebar and get settings
+    settings = render_sidebar()
+
+    # 3. Main title with gradient effect
+    st.markdown(
+        '<h1 class="gradient-title">🔮 Viral Scraper</h1>',
+        unsafe_allow_html=True,
+    )
+
+    # 4. Three main tabs
+    tab_discovery, tab_trends, tab_analytics = st.tabs(
+        ["🎯 Discovery", "📈 Trends", "⚡ Analytics"]
+    )
+
+    # 5. Handle scrape action
+    if settings["scrape_clicked"]:
+        query = settings["query"]
+        platforms = settings["platforms"]
+
+        if not query:
+            st.warning("Please enter a hashtag or keyword before scraping.")
+        elif not platforms:
+            st.warning("Please select at least one platform.")
+        else:
+            try:
+                app_settings = _build_app_settings()
+            except EnvironmentError as exc:
+                st.error(f"Configuration error: {exc}")
+                _maybe_render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
+                return
+
+            with st.spinner(f'Scraping viral content for "{query}"…'):
+                try:
+                    raw_items = asyncio.run(
+                        _run_scrapers(
+                            settings_obj=app_settings,
+                            query=query,
+                            platforms=platforms,
+                            max_results=settings["max_results"],
+                        )
+                    )
+                except Exception as exc:
+                    st.error(
+                        f"Scraping failed: {exc}. "
+                        "Check your APIFY_API_TOKEN and network connection."
+                    )
+                    logger.exception("Scraping error")
+                    _maybe_render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
+                    return
+
+            if not raw_items:
+                st.warning(
+                    "No results returned. The query may have no content or "
+                    "the Apify actors may need more time. Try again."
+                )
+                _maybe_render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
+                return
+
+            # Score items
+            scorer = ViralityScorer()
+            scored_items = scorer.score_batch(raw_items)
+
+            # Compute Richey scores
+            cf = ContentFilter()
+            richey_scores: dict[str, float] = {
+                item.id: cf.richey_score(item) for item in scored_items
+            }
+
+            # Apply Richey filter for storage if richey_only is set
+            if settings["richey_only"]:
+                filtered_items = cf.filter(scored_items, min_richey_score=settings["min_richey"])
+            else:
+                filtered_items = scored_items
+
+            # Persist to session state
+            st.session_state["items"] = filtered_items
+            st.session_state["richey_scores"] = richey_scores
+            st.session_state["all_items"] = scored_items
+
+            st.success(
+                f"✅ Scraped {len(raw_items)} videos → "
+                f"{len(filtered_items)} passed filters. Showing results below."
+            )
+
+    # 6. Render tab content
+    _maybe_render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
+
+
+def _maybe_render_tabs(tab_discovery, tab_trends, tab_analytics, settings: dict) -> None:
+    """Render tab content from session state, or show hero if no data."""
+    items: list[VideoItem] = st.session_state.get("items", [])
+    richey_scores: dict = st.session_state.get("richey_scores", {})
+    analyzer = TrendAnalyzer()
+
+    if items:
+        with tab_discovery:
+            render_summary_metrics(items)
+            st.markdown("<br>", unsafe_allow_html=True)
+            render_discovery_dashboard(items, richey_scores, settings)
+
+        with tab_trends:
+            render_trends_map(items, analyzer)
+
+        with tab_analytics:
+            render_virality_chart(items)
+    else:
+        # 7. Hero welcome section when no data
+        with tab_discovery:
+            _render_hero()
+
+        with tab_trends:
+            empty_state("Scrape some content first to explore trends.")
+
+        with tab_analytics:
+            empty_state("Scrape some content first to see analytics charts.")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    main()
