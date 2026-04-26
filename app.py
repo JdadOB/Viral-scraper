@@ -86,8 +86,8 @@ def _build_app_settings() -> AppSettings:
 # ---------------------------------------------------------------------------
 
 @st.cache_resource(show_spinner=False)
-def _get_apify_client(token: str) -> ApifyClientWrapper:
-    return ApifyClientWrapper(api_token=token)
+def _get_apify_client(token: str, proxy_rotation_enabled: bool = True) -> ApifyClientWrapper:
+    return ApifyClientWrapper(api_token=token, proxy_rotation_enabled=proxy_rotation_enabled)
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ async def _scrape_async(
     platforms: list[str],
     max_results: int,
 ) -> list[VideoItem]:
-    client = _get_apify_client(settings_obj.apify_api_token)
+    client = _get_apify_client(settings_obj.apify_api_token, settings_obj.proxy_rotation_enabled)
     tasks = []
 
     is_hashtag = query.startswith("#")
