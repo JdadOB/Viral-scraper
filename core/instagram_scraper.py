@@ -13,19 +13,20 @@ logger = logging.getLogger(__name__)
 
 _HASHTAG_RE = re.compile(r"#(\w+)")
 
-# Raw fields that indicate a video/reel (vs. a static photo)
-_VIDEO_TYPES = {"Video", "Reel", "video", "reel"}
-
 
 def _is_video(raw: dict) -> bool:
-    """Return True if the raw Instagram item is a video or reel."""
-    if raw.get("isVideo"):
+    """Return True if the raw item is a video or reel (not a photo).
+
+    The Apify Instagram scraper 1.x uses GraphVideo / GraphReel type strings,
+    so we substring-match rather than exact-match.
+    """
+    if raw.get("isVideo") is True:
         return True
-    if raw.get("type") in _VIDEO_TYPES:
+    media_type = str(raw.get("type") or raw.get("mediaType") or "").lower()
+    if "video" in media_type or "reel" in media_type:
         return True
-    if raw.get("mediaType") in _VIDEO_TYPES:
+    if raw.get("videoUrl"):
         return True
-    # Fall back: any non-zero video play/view count means it's a video
     if int(raw.get("videoPlayCount") or raw.get("videoViewCount") or 0) > 0:
         return True
     return False
@@ -39,7 +40,6 @@ class InstagramScraper:
         self._settings = settings
 
     def _base_input(self, limit: int) -> dict:
-        """Common actor input fields."""
         oldest = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
         return {
             "resultsType": "posts",
@@ -54,15 +54,12 @@ class InstagramScraper:
         hashtag: str,
         max_results: Optional[int] = None,
     ) -> ScraperResult:
-        """Scrape Instagram Reels for a given hashtag."""
         limit = max_results if max_results is not None else self._settings.max_results_per_query
         clean_hashtag = hashtag.lstrip("#")
 
-        # directUrls targets the explore/tags page which surfaces reels,
-        # unlike the 'hashtags' key which tends to return feed photos.
         run_input = {
             **self._base_input(limit),
-            "directUrls": [f"https://www.instagram.com/explore/tags/{clean_hashtag}/"],
+            "hashtags": [clean_hashtag],
         }
 
         try:
@@ -70,9 +67,11 @@ class InstagramScraper:
                 actor_id=self._settings.instagram_actor_id,
                 run_input=run_input,
             )
-            video_items = [
-                self._map_item(raw) for raw in raw_items if _is_video(raw)
-            ]
+            video_items = [self._map_item(r) for r in raw_items if _is_video(r)]
+            logger.info(
+                "Instagram hashtag '#%s': %d raw items, %d videos kept.",
+                clean_hashtag, len(raw_items), len(video_items),
+            )
             return ScraperResult(
                 platform=Platform.INSTAGRAM,
                 query=f"#{clean_hashtag}",
@@ -96,13 +95,12 @@ class InstagramScraper:
         keyword: str,
         max_results: Optional[int] = None,
     ) -> ScraperResult:
-        """Scrape Instagram Reels for a keyword (treated as a hashtag search)."""
         limit = max_results if max_results is not None else self._settings.max_results_per_query
         clean = keyword.lstrip("#").replace(" ", "")
 
         run_input = {
             **self._base_input(limit),
-            "directUrls": [f"https://www.instagram.com/explore/tags/{clean}/"],
+            "hashtags": [clean],
         }
 
         try:
@@ -110,9 +108,11 @@ class InstagramScraper:
                 actor_id=self._settings.instagram_actor_id,
                 run_input=run_input,
             )
-            video_items = [
-                self._map_item(raw) for raw in raw_items if _is_video(raw)
-            ]
+            video_items = [self._map_item(r) for r in raw_items if _is_video(r)]
+            logger.info(
+                "Instagram keyword '%s': %d raw items, %d videos kept.",
+                keyword, len(raw_items), len(video_items),
+            )
             return ScraperResult(
                 platform=Platform.INSTAGRAM,
                 query=keyword,
@@ -132,7 +132,6 @@ class InstagramScraper:
             )
 
     def _map_item(self, raw: dict) -> VideoItem:
-        """Map a raw Instagram API response dict to a VideoItem."""
         caption: str = str(raw.get("caption") or raw.get("alt") or "")
         hashtags: list[str] = _HASHTAG_RE.findall(caption)
 
