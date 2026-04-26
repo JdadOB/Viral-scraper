@@ -324,7 +324,7 @@ def main() -> None:
             scorer = ViralityScorer()
             scored_items = scorer.score_batch(raw_items)
 
-            # Hard 30-day cutoff — never show content older than one month
+            # Hard 30-day cutoff
             from datetime import datetime, timedelta
             cutoff = datetime.utcnow() - timedelta(days=30)
             recent_items = [
@@ -332,13 +332,27 @@ def main() -> None:
                 if item.posted_at is None
                 or item.posted_at.replace(tzinfo=None) >= cutoff
             ]
-            dropped = len(scored_items) - len(recent_items)
 
-            st.session_state["items"] = recent_items
+            # 10k follower minimum — skip micro accounts
+            # (keep items where follower data is absent so we don't over-filter)
+            filtered_items = [
+                item for item in recent_items
+                if item.follower_count == 0 or item.follower_count >= 10_000
+            ]
 
-            msg = f"✅ Scraped {len(raw_items)} videos — {len(recent_items)} from the last 30 days."
-            if dropped:
-                msg += f" ({dropped} older videos removed.)"
+            dropped_old = len(scored_items) - len(recent_items)
+            dropped_small = len(recent_items) - len(filtered_items)
+
+            st.session_state["items"] = filtered_items
+
+            msg = f"✅ Scraped {len(raw_items)} videos → {len(filtered_items)} shown."
+            notes = []
+            if dropped_old:
+                notes.append(f"{dropped_old} older than 30 days")
+            if dropped_small:
+                notes.append(f"{dropped_small} under 10k followers")
+            if notes:
+                msg += f" (Removed: {', '.join(notes)}.)"
             st.success(msg)
 
     _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)

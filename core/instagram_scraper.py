@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from config.settings import AppSettings
@@ -13,32 +13,56 @@ logger = logging.getLogger(__name__)
 
 _HASHTAG_RE = re.compile(r"#(\w+)")
 
+# Raw fields that indicate a video/reel (vs. a static photo)
+_VIDEO_TYPES = {"Video", "Reel", "video", "reel"}
+
+
+def _is_video(raw: dict) -> bool:
+    """Return True if the raw Instagram item is a video or reel."""
+    if raw.get("isVideo"):
+        return True
+    if raw.get("type") in _VIDEO_TYPES:
+        return True
+    if raw.get("mediaType") in _VIDEO_TYPES:
+        return True
+    # Fall back: any non-zero video play/view count means it's a video
+    if int(raw.get("videoPlayCount") or raw.get("videoViewCount") or 0) > 0:
+        return True
+    return False
+
 
 class InstagramScraper:
-    """Scrapes Instagram content via the Apify apify/instagram-scraper actor."""
+    """Scrapes Instagram Reels via the Apify apify/instagram-scraper actor."""
 
     def __init__(self, client: ApifyClientWrapper, settings: AppSettings) -> None:
         self._client = client
         self._settings = settings
+
+    def _base_input(self, limit: int) -> dict:
+        """Common actor input fields."""
+        oldest = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+        return {
+            "resultsType": "posts",
+            "resultsLimit": limit,
+            "addParentData": False,
+            "onlyPostsNewerThan": oldest,
+            "proxy": self._client._build_proxy_config(),
+        }
 
     async def scrape_hashtag(
         self,
         hashtag: str,
         max_results: Optional[int] = None,
     ) -> ScraperResult:
-        """Scrape Instagram videos/reels for a given hashtag."""
+        """Scrape Instagram Reels for a given hashtag."""
         limit = max_results if max_results is not None else self._settings.max_results_per_query
         clean_hashtag = hashtag.lstrip("#")
 
-        from datetime import datetime, timedelta
-        oldest = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
-        run_input: dict = {
-            "hashtags": [clean_hashtag],
-            "resultsLimit": limit,
-            "resultsType": "posts",
-            "addParentData": False,
-            "onlyPostsNewerThan": oldest,
-            "proxy": self._client._build_proxy_config(),
+        # directUrls targets the explore/tags page which surfaces reels,
+        # unlike the 'hashtags' key which tends to return feed photos.
+        run_input = {
+            **self._base_input(limit),
+            "directUrls": [f"https://www.instagram.com/explore/tags/{clean_hashtag}/"],
         }
 
         try:
@@ -46,7 +70,9 @@ class InstagramScraper:
                 actor_id=self._settings.instagram_actor_id,
                 run_input=run_input,
             )
-            video_items = [self._map_item(raw) for raw in raw_items]
+            video_items = [
+                self._map_item(raw) for raw in raw_items if _is_video(raw)
+            ]
             return ScraperResult(
                 platform=Platform.INSTAGRAM,
                 query=f"#{clean_hashtag}",
@@ -70,19 +96,13 @@ class InstagramScraper:
         keyword: str,
         max_results: Optional[int] = None,
     ) -> ScraperResult:
-        """Scrape Instagram content for a given keyword search."""
+        """Scrape Instagram Reels for a keyword (treated as a hashtag search)."""
         limit = max_results if max_results is not None else self._settings.max_results_per_query
+        clean = keyword.lstrip("#").replace(" ", "")
 
-        from datetime import datetime, timedelta
-        oldest = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
-        run_input: dict = {
-            "search": keyword,
-            "searchType": "hashtag",
-            "resultsLimit": limit,
-            "resultsType": "posts",
-            "addParentData": False,
-            "onlyPostsNewerThan": oldest,
-            "proxy": self._client._build_proxy_config(),
+        run_input = {
+            **self._base_input(limit),
+            "directUrls": [f"https://www.instagram.com/explore/tags/{clean}/"],
         }
 
         try:
@@ -90,7 +110,9 @@ class InstagramScraper:
                 actor_id=self._settings.instagram_actor_id,
                 run_input=run_input,
             )
-            video_items = [self._map_item(raw) for raw in raw_items]
+            video_items = [
+                self._map_item(raw) for raw in raw_items if _is_video(raw)
+            ]
             return ScraperResult(
                 platform=Platform.INSTAGRAM,
                 query=keyword,
