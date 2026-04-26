@@ -6,7 +6,6 @@ from functools import partial
 from typing import Any
 
 from apify_client import ApifyClient
-from apify_client.consts import ActorJobStatus
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
@@ -62,7 +61,7 @@ class ApifyClientWrapper:
             raise RuntimeError(f"Actor '{actor_id}' returned no run object.")
 
         status = run.get("status")
-        if status not in (ActorJobStatus.SUCCEEDED, "SUCCEEDED"):
+        if status != "SUCCEEDED":
             raise RuntimeError(
                 f"Actor '{actor_id}' finished with non-success status: {status}"
             )
