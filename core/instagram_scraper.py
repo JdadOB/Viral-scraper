@@ -30,11 +30,14 @@ class InstagramScraper:
         limit = max_results if max_results is not None else self._settings.max_results_per_query
         clean_hashtag = hashtag.lstrip("#")
 
+        from datetime import datetime, timedelta
+        oldest = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
         run_input: dict = {
             "hashtags": [clean_hashtag],
             "resultsLimit": limit,
             "resultsType": "posts",
             "addParentData": False,
+            "onlyPostsNewerThan": oldest,
             "proxy": self._client._build_proxy_config(),
         }
 
@@ -70,12 +73,15 @@ class InstagramScraper:
         """Scrape Instagram content for a given keyword search."""
         limit = max_results if max_results is not None else self._settings.max_results_per_query
 
+        from datetime import datetime, timedelta
+        oldest = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
         run_input: dict = {
             "search": keyword,
             "searchType": "hashtag",
             "resultsLimit": limit,
             "resultsType": "posts",
             "addParentData": False,
+            "onlyPostsNewerThan": oldest,
             "proxy": self._client._build_proxy_config(),
         }
 

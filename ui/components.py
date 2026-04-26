@@ -82,6 +82,25 @@ def video_card(item: VideoItem) -> str:
         '</div>'
     )
 
+    # --- Posted date -----------------------------------------------------
+    if item.posted_at:
+        from datetime import datetime
+        delta = datetime.utcnow() - item.posted_at.replace(tzinfo=None)
+        days = delta.days
+        if days == 0:
+            age_str = "Today"
+        elif days == 1:
+            age_str = "Yesterday"
+        elif days < 7:
+            age_str = f"{days}d ago"
+        elif days < 30:
+            age_str = f"{days // 7}w ago"
+        else:
+            age_str = f"{days}d ago"
+        date_html = f'<div class="video-card-date">🕐 {age_str}</div>'
+    else:
+        date_html = ""
+
     # --- View/follower ratio badge (viral signal) -------------------------
     views = item.view_count or item.play_count
     if item.follower_count > 0 and views > 0:
@@ -117,6 +136,7 @@ def video_card(item: VideoItem) -> str:
     </div>
     {score_badge}
   </div>
+  {date_html}
   {desc_html}
   {metrics_html}
   {ratio_html}

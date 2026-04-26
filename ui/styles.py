@@ -259,6 +259,13 @@ def inject_css() -> None:
             margin-bottom: 0.5rem;
         }
 
+        .video-card-date {
+            font-size: 0.72rem;
+            color: #A0A0B0;
+            margin-bottom: 0.35rem;
+            letter-spacing: 0.02em;
+        }
+
         .video-card-author {
             font-weight: 600;
             font-size: 0.9rem;

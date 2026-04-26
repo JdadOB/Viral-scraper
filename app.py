@@ -324,9 +324,22 @@ def main() -> None:
             scorer = ViralityScorer()
             scored_items = scorer.score_batch(raw_items)
 
-            st.session_state["items"] = scored_items
+            # Hard 30-day cutoff — never show content older than one month
+            from datetime import datetime, timedelta
+            cutoff = datetime.utcnow() - timedelta(days=30)
+            recent_items = [
+                item for item in scored_items
+                if item.posted_at is None
+                or item.posted_at.replace(tzinfo=None) >= cutoff
+            ]
+            dropped = len(scored_items) - len(recent_items)
 
-            st.success(f"✅ Scraped {len(raw_items)} videos — scored and ready.")
+            st.session_state["items"] = recent_items
+
+            msg = f"✅ Scraped {len(raw_items)} videos — {len(recent_items)} from the last 30 days."
+            if dropped:
+                msg += f" ({dropped} older videos removed.)"
+            st.success(msg)
 
     _render_tabs(tab_discovery, tab_trends, tab_analytics, settings)
 

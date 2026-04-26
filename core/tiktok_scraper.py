@@ -33,6 +33,7 @@ class TikTokScraper:
             "maxResults": limit,
             "shouldDownloadVideos": False,
             "shouldDownloadCovers": False,
+            "dateRange": "last_month",
             "proxyConfiguration": self._client._build_proxy_config(),
         }
 
@@ -74,6 +75,7 @@ class TikTokScraper:
             "maxResults": limit,
             "shouldDownloadVideos": False,
             "shouldDownloadCovers": False,
+            "dateRange": "last_month",
             "proxyConfiguration": self._client._build_proxy_config(),
         }
 
